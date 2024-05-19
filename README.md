@@ -2,6 +2,8 @@
 
 ### 설치 코드
 `sh start.sh`
+### 서버 중지  
+pkill uvicorn
 
 cd server  
 vi main.py  
