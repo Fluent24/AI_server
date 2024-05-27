@@ -2,11 +2,13 @@ import os
 import sys
 import tempfile
 import subprocess
+import boto3
+import json
 
 sys.path.append('/usr/bin/ffmpeg')
 
 import torchaudio  # PyTorch audio library
-from fastapi import FastAPI, File, Response, UploadFile  # FastAPI web framework
+from fastapi import FastAPI, File, Response, UploadFile, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse  # FastAPI response types
 
 from speechbrain.inference.ASR import EncoderDecoderASR  # SpeechBrain ASR model
@@ -17,14 +19,23 @@ from .inference_wav import inference_wav  # Custom inference module
 
 app = FastAPI()
 
+tts_dir = os.path.join(tempfile.gettempdir(), "tmpdir_tts")
+vocoder_dir = os.path.join(tempfile.gettempdir(), "tmpdir_vocoder")
+asr_dir = os.path.join(tempfile.gettempdir(), "pretrained_models/asr-crdnn-rnnlm-librispeech")
+
 tacotron2 = Tacotron2.from_hparams(
-    source="speechbrain/tts-tacotron2-ljspeech", savedir="tmpdir_tts"
+    source="speechbrain/tts-tacotron2-ljspeech", savedir=tts_dir
 )
 hifi_gan = HIFIGAN.from_hparams(
-    source="speechbrain/tts-hifigan-ljspeech", savedir="tmpdir_vocoder"
+    source="speechbrain/tts-hifigan-ljspeech", savedir=vocoder_dir
 )
 asr_model = EncoderDecoderASR.from_hparams(
-    source="speechbrain/asr-crdnn-rnnlm-librispeech", savedir="pretrained_models/asr-crdnn-rnnlm-librispeech")
+    source="speechbrain/asr-crdnn-rnnlm-librispeech", savedir=asr_dir
+)
+
+# New client for Bedrock Runtime
+bedrock_client = boto3.client("bedrock-runtime", region_name="us-east-1")
+model_id = "meta.llama3-70b-instruct-v1:0"
 
 @app.get("/tts/")
 async def tts(text: str):
@@ -103,3 +114,31 @@ async def predict(files: list[UploadFile] = File(...)):
         results.append({"filename": file.filename, "score_prosody": score1, "score_articulation": score2, "total_score" : total_score})
 
     return JSONResponse(content=results)
+
+@app.post("/generate-sentences/")
+async def generate_sentences(category: str = Query(..., description="Category for sentence generation")):
+    categories = ["travel", "romance", "exercise", "meetings", "food", "movies", "music"]
+    if category not in categories:
+        raise HTTPException(status_code=400, detail="Invalid category. Choose from travel, romance, exercise, meetings, food, movies, music.")
+
+    user_message = f"Generate 10 different {category}-related English sentences at each level: Bronze, Silver, Gold, Diamond, and Master."
+
+    prompt = f"""
+    user
+    {user_message}
+
+    assistant
+    """
+
+    request = {
+        "prompt": prompt,
+        "max_gen_len": 2048,
+        "temperature": 0.5,
+        "top_p": 0.9,
+    }
+
+    response = bedrock_client.invoke_model(body=json.dumps(request), modelId=model_id)
+    model_response = json.loads(response["body"].read())
+    response_text = model_response["generation"]
+    
+    return {"generated_text": response_text}

@@ -8,3 +8,4 @@ Levenshtein
 soundfile
 pydub
 audiofile
+boto3
