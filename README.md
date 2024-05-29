@@ -1,13 +1,9 @@
-# AI_server
-
-
-
-
 # Fluent AI 서버
 
-이 저장소는 오디오 파일을 처리하고, 텍스트로 변환(STT), 텍스트를 음성으로 변환(TTS), 그리고 발음 평가를 수행하는 다양한 스크립트를 포함하고 있습니다. 주요 기능은 FastAPI를 사용하여 RESTful API를 제공하는 것입니다.
+이 저장소는 오디오 파일을 처리하고 텍스트로 변환(STT), 텍스트를 음성으로 변환(TTS), 그리고 발음 평가를 수행하는 다양한 스크립트를 포함하고 있습니다. 주요 기능은 FastAPI를 사용하여 RESTful API를 제공하는 것입니다.
 
 ## 목차
+
 - [프로젝트 구조](#프로젝트-구조)
 - [설치](#설치)
 - [사용법](#사용법)
@@ -63,41 +59,64 @@ FastAPI 서버를 실행하려면, 다음 명령을 실행하세요:
 ```bash
 uvicorn server.main:app --reload
 ```
-### 설치 코드
-`sh start.sh`
-### 서버 중지  
-pkill uvicorn
 
-cd server  
-vi main.py  
+### 설치 코드
+
+```bash
+sh start.sh
+```
+
+### 서버 중지
+
+```bash
+pkill uvicorn
+```
+
+### 파일 경로 수정
+
+`server/main.py` 파일에서 `dir_model` 경로를 수정하세요:
+
+```python
 dir_model='/home/coldbrew/fluent/scoring_system/fastapi_server/server/model_ckpt/' -> '/home/ec2-user/scoring_system/fastapi_server/serverfastapi_server/server'
-### fast api 실행 코드
-`sh start.sh`
+```
+
+### FastAPI 실행 코드
+
+```bash
+sh start.sh
+```
 
 ### 필요한 파일
+
+- server
+  - main.py
+  - inference_wav.py
+  - score_model.py
+  - score_input.m4a
+  - model_ckpt/
+    - pron_articulation_checkpoint.pt
+    - pron_prosody_checkpoint.pt
+
+## 요청 예시
+
+### 요청
+
+```bash
+curl -X POST "http://localhost:10010/infer/" -H "Content-Type: multipart/form-data" -F "files=@score_input.m4a"
 ```
-  server - main.py
-         - inference_wav.py
-         - score_model.py
-         - score_input.m4a
-         - model_ckpt/
-           - pron_articulation_checkpoint.pt
-           - pron_prosody_checkpoint.pt
+
+### 답변
+
+```json
+[{"filename":"score_input.m4a","score_prosody":3.5421228408813477,"score_articulation":2.034834384918213,"total_score":5.5769572257995605}]
 ```
 
-### 요청 예시
-- 요청 :   
-$ `curl -X POST "http://localhost:10010/infer/" -H "Content-Type: multipart/form-data" -F "files=@score_input.m4a"  `
-- 답변 :   
-`[{"filename":"score_input.m4a","score_prosody":3.5421228408813477,"score_articulation":2.034834384918213,"total_score":5.5769572257995605}]`  
+## server/inference_wav.py
 
+- **함수 이름**: `def inference_wav(lang: str, label_type1: str, label_type2: str, dir_model: str, device: str, audio_len_max: int, wav: str):`
+- **함수 출력**: `return pred_score[0][0]`
 
-### server/inference_wav.py
-- 함수 이름 : `def inference_wav(lang: str, label_type1: str, label_type2: str, dir_model: str, device: str, audio_len_max: int, wav: str): ` 
-- 함수 출력 : `return pred_score[0][0]`
-
-
-### API 엔드포인트
+## API 엔드포인트
 
 - **TTS(Text-to-Speech)**: 텍스트를 음성 파일로 변환합니다.
   - **GET `/tts/`**
@@ -128,6 +147,16 @@ $ `curl -X POST "http://localhost:10010/infer/" -H "Content-Type: multipart/form
 - `list.py`: 데이터셋 목록을 생성하는 스크립트입니다.
 - `make.sh`: 프로젝트 설정을 자동화하는 셸 스크립트입니다.
 - `start.sh`: 서버를 시작하는 스크립트입니다.
+
+## 기여 방법
+
+이 저장소의 기능과 성능을 향상시키기 위한 기여를 환영합니다. 기여하려면 다음 단계를 따르세요:
+
+1. 저장소를 포크하세요.
+2. 새로운 브랜치를 생성하세요 (`git checkout -b feature-branch`).
+3. 변경 사항을 커밋하세요 (`git commit -am 'Add new feature'`).
+4. 브랜치에 푸시하세요 (`git push origin feature-branch`).
+5. 새로운 풀 리퀘스트를 생성하세요.
 
 ## 라이센스
 
