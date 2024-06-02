@@ -16,7 +16,7 @@ from speechbrain.inference.ASR import EncoderDecoderASR  # SpeechBrain ASR model
 from speechbrain.inference.TTS import Tacotron2  # SpeechBrain TTS model
 from speechbrain.inference.vocoders import HIFIGAN  # SpeechBrain vocoder model
 
-from .inference_wav import inference_wav  # Custom inference module
+from .inference_wav_SVR import inference_wav  # Custom inference module
 
 app = FastAPI()
 
