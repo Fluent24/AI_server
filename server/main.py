@@ -4,6 +4,7 @@ import tempfile
 import subprocess
 import boto3
 import json
+import concurrent.futures
 
 sys.path.append('/usr/bin/ffmpeg')
 
@@ -112,6 +113,73 @@ async def predict(files: list[UploadFile] = File(...)):
         os.remove(wav_file_path)
 
         results.append({"filename": file.filename, "score_prosody": score1, "score_articulation": score2, "total_score" : total_score})
+
+    return JSONResponse(content=results)
+
+@app.post("/infer2/")
+async def predict(files: list[UploadFile] = File(...)):
+    results = []
+
+    with concurrent.futures.ThreadPoolExecutor() as executor:  
+        futures = []
+        for file in files:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".m4a") as temp_m4a_file:
+                m4a_file_path = temp_m4a_file.name
+                temp_m4a_file.write(await file.read())
+
+            wav_file_path = m4a_file_path.replace(".m4a", ".wav")
+            subprocess.run(["ffmpeg", "-i", m4a_file_path, wav_file_path])
+
+            # --- Parallel STT Transcription ---
+            stt_future = executor.submit(asr_model.transcribe_file, wav_file_path)
+
+            # --- Parallel Inference ---
+            prosody_future = executor.submit(
+                inference_wav, 
+                lang="en",
+                label_type1="pron",
+                label_type2="prosody",
+                dir_model='/home/ec2-user/AI_server/server/model_svr_ckpt',
+                device="cpu",
+                audio_len_max=200000,
+                wav=wav_file_path
+            )
+            articulation_future = executor.submit(
+                inference_wav,
+                lang="en",
+                label_type1="pron",
+                label_type2="articulation",
+                dir_model='/home/ec2-user/AI_server/server/model_svr_ckpt',
+                device="cpu",
+                audio_len_max=200000,
+                wav=wav_file_path
+            )
+
+            futures.append((file, stt_future, prosody_future, articulation_future))
+
+        # Gather results
+        for file, stt_future, prosody_future, articulation_future in futures:
+            try:
+                transcription = stt_future.result()
+            except Exception as e:
+                transcription = f"Error during transcription: {str(e)}"
+            
+            score_prosody = prosody_future.result()
+            score_articulation = articulation_future.result()
+            score1 = float(score_prosody)
+            score2 = float(score_articulation)
+            total_score = score1 + score2
+
+            os.remove(m4a_file_path)
+            os.remove(wav_file_path)  # Clean up here after results are gathered
+
+            results.append({
+                "filename": file.filename,
+                "score_prosody": score1,
+                "score_articulation": score2,
+                "total_score": total_score,
+                "transcription": transcription
+            })
 
     return JSONResponse(content=results)
 
