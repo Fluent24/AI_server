@@ -39,7 +39,7 @@
 │   │   └── lang_en #/infer/ 용
 │   │       ├── pron_articulation_checkpoint.pt
 │   │       └── pron_prosody_checkpoint.pt
-|   ├── model_svr_ckpt (구글 드라이버에서 다운 필요)
+|   ├── model_svr_ckpt (구글 드라이버에서 다운 필요) https://drive.google.com/file/d/1F71jnc8ycJK4A27Du95p_3yC-lnnIlv1/view?usp=share_link
 │   │   └── lang_en #/infer2/ 용
 │   │       ├── scaler_pron+articulation.joblib  
 │   │       └── scaler_pron+prosody.joblib  
