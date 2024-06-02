@@ -4,12 +4,20 @@
 
 ## 목차
 
-- [프로젝트 구조](#프로젝트-구조)
-- [설치](#설치)
-- [사용법](#사용법)
-- [스크립트 설명](#스크립트-설명)
-- [기여 방법](#기여-방법)
-- [라이센스](#라이센스)
+- [Fluent AI 서버](#fluent-ai-서버)
+  - [목차](#목차)
+  - [프로젝트 구조](#프로젝트-구조)
+  - [설치](#설치)
+  - [사용법](#사용법)
+    - [서버 중지](#서버-중지)
+    - [파일 경로 수정](#파일-경로-수정)
+  - [요청 예시](#요청-예시)
+    - [요청](#요청)
+    - [답변](#답변)
+  - [server/inference\_wav.py](#serverinference_wavpy)
+  - [API 엔드포인트](#api-엔드포인트)
+  - [스크립트 설명](#스크립트-설명)
+  - [라이센스](#라이센스)
 
 ## 프로젝트 구조
 
@@ -25,11 +33,18 @@
 ├── requirements.txt
 ├── server
 │   ├── inference_wav.py
+│   ├── inference_wav_SVR.py
 │   ├── main.py
 │   ├── model_ckpt
-│   │   └── lang_en
+│   │   └── lang_en #/infer/ 용
 │   │       ├── pron_articulation_checkpoint.pt
 │   │       └── pron_prosody_checkpoint.pt
+|   ├── model_svr_ckpt (구글 드라이버에서 다운 필요)
+│   │   └── lang_en #/infer2/ 용
+│   │       ├── scaler_pron+articulation.joblib  
+│   │       └── scaler_pron+prosody.joblib  
+│   │       └── svr_model_pron+articulation.joblib  
+│   │       └── svr_model_pron+prosody.joblib
 │   ├── score_model.py
 │   └── test.py
 ├── server.log
@@ -57,12 +72,6 @@ docker run -p 8000:8000 fluent-ai-server
 FastAPI 서버를 실행하려면, 다음 명령을 실행하세요:
 
 ```bash
-uvicorn server.main:app --reload
-```
-
-### 설치 코드
-
-```bash
 sh start.sh
 ```
 
@@ -77,38 +86,22 @@ pkill uvicorn
 `server/main.py` 파일에서 `dir_model` 경로를 수정하세요:
 
 ```python
-dir_model='/home/coldbrew/fluent/scoring_system/fastapi_server/server/model_ckpt/' -> '/home/ec2-user/scoring_system/fastapi_server/serverfastapi_server/server'
+dir_model='' -> './AI_server/server/model_ckpt'
 ```
-
-### FastAPI 실행 코드
-
-```bash
-sh start.sh
-```
-
-### 필요한 파일
-
-- server
-  - main.py
-  - inference_wav.py
-  - score_model.py
-  - score_input.m4a
-  - model_ckpt/
-    - pron_articulation_checkpoint.pt
-    - pron_prosody_checkpoint.pt
 
 ## 요청 예시
 
 ### 요청
 
 ```bash
-curl -X POST "http://localhost:10010/infer/" -H "Content-Type: multipart/form-data" -F "files=@score_input.m4a"
+curl -X POST http://localhost:10010/infer2/ -H "Content-Type: multipart/form-data" -F "files=@/home/ec2-user/AI_server/server/exa
+mple_TTS.wav"
 ```
 
 ### 답변
 
 ```json
-[{"filename":"score_input.m4a","score_prosody":3.5421228408813477,"score_articulation":2.034834384918213,"total_score":5.5769572257995605}]
+[{"filename":"example_TTS.wav","score_prosody":4.49035915865262,"score_articulation":4.49035915865262,"total_score":8.98071831730524,"transcription":"DID HE WRITE STORIES WHEN HE WAS YOUNGER I THINK HE USED TO WRITE NOVELS"}]
 ```
 
 ## server/inference_wav.py
@@ -132,6 +125,11 @@ curl -X POST "http://localhost:10010/infer/" -H "Content-Type: multipart/form-da
   - **POST `/infer/`**
   - 요청 파일: 오디오 파일 리스트 (`UploadFile`)
   - 응답: 평가 점수
+  - 
+- - **발음 평가2**: 오디오 파일의 발음을 평가 + STT합니다.
+  - **POST `/infer2/`**
+  - 요청 파일: 오디오 파일 리스트 (`UploadFile`)
+  - 응답: 평가 점수  
 
 - **문장 생성**: 특정 카테고리에 맞는 문장을 생성합니다.
   - **POST `/generate-sentences/`**
@@ -145,18 +143,8 @@ curl -X POST "http://localhost:10010/infer/" -H "Content-Type: multipart/form-da
 - `score_model.py`: 발음 평가를 위한 MLP 모델을 정의합니다.
 - `bedrock_example_codes/`: AWS Bedrock을 사용한 예제 코드들입니다.
 - `list.py`: 데이터셋 목록을 생성하는 스크립트입니다.
-- `make.sh`: 프로젝트 설정을 자동화하는 셸 스크립트입니다.
 - `start.sh`: 서버를 시작하는 스크립트입니다.
 
-## 기여 방법
-
-이 저장소의 기능과 성능을 향상시키기 위한 기여를 환영합니다. 기여하려면 다음 단계를 따르세요:
-
-1. 저장소를 포크하세요.
-2. 새로운 브랜치를 생성하세요 (`git checkout -b feature-branch`).
-3. 변경 사항을 커밋하세요 (`git commit -am 'Add new feature'`).
-4. 브랜치에 푸시하세요 (`git push origin feature-branch`).
-5. 새로운 풀 리퀘스트를 생성하세요.
 
 ## 라이센스
 
