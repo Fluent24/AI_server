@@ -9,14 +9,14 @@ import concurrent.futures
 sys.path.append('/usr/bin/ffmpeg')
 
 import torchaudio  # PyTorch audio library
-from fastapi import FastAPI, File, Response, UploadFile, HTTPException, Query
+from fastapi import FastAPI, File, Response, UploadFile, HTTPException, Query, Form
 from fastapi.responses import FileResponse, JSONResponse  # FastAPI response types
 
 from speechbrain.inference.ASR import EncoderDecoderASR  # SpeechBrain ASR model
 from speechbrain.inference.TTS import Tacotron2  # SpeechBrain TTS model
 from speechbrain.inference.vocoders import HIFIGAN  # SpeechBrain vocoder model
 
-from .inference_wav_SVR import inference_wav  # Custom inference module
+from .inference_wav_SVR import inference_wav
 
 app = FastAPI()
 
@@ -40,6 +40,27 @@ model_id = "meta.llama3-70b-instruct-v1:0"
 
 @app.get("/tts/")
 async def tts(text: str):
+    # 임시 파일 생성
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+        filepath = temp_file.name
+
+    # TTS 및 Vocoder 실행
+    mel_output, mel_length, alignment = tacotron2.encode_text(text)
+    waveforms = hifi_gan.decode_batch(mel_output)
+
+    # 음성 파일 저장
+    torchaudio.save(filepath, waveforms.squeeze(1), 22050)
+
+    # 생성된 파일 반환
+    headers = {
+        "Content-Disposition": f'attachment; filename="{os.path.basename(filepath)}"'
+    }
+    return FileResponse(
+        filepath, media_type="audio/wav", headers=headers,
+    )
+
+@app.post("/tts/")
+async def tts(text: str = Form(...)):
     # 임시 파일 생성
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
         filepath = temp_file.name
@@ -91,23 +112,25 @@ async def predict(files: list[UploadFile] = File(...)):
             lang="en",
             label_type1="pron",
             label_type2="prosody",
-            dir_model='/home/ec2-user/AI_server/server/model_ckpt',
+            dir_model='/home/ec2-user/AI_server/server/model_svr_ckpt',
             device="cpu",
             audio_len_max=200000,
             wav=wav_file_path
         )
-        score_articulation = inference_wav(
-            lang="en",
-            label_type1="pron",
-            label_type2="articulation",
-            dir_model='/home/ec2-user/AI_server/server/model_ckpt',
-            device="cpu",
-            audio_len_max=200000,
-            wav=wav_file_path
-        )
+        # score_articulation = inference_wav(
+        #     lang="en",
+        #     label_type1="pron",
+        #     label_type2="articulation",
+        #     dir_model='/home/ec2-user/AI_server/server/model_svr_ckpt',
+        #     device="cpu",
+        #     audio_len_max=200000,
+        #     wav=wav_file_path
+        # )
         score1 = float(score_prosody)
-        score2 = float(score_articulation)
-        total_score = score1 + score2
+        score2 = score1
+        #score2 = float(score_articulation)
+        #total_score = score1 + score2
+        total_score = score1*2
         # Clean up temporary files
         os.remove(m4a_file_path)
         os.remove(wav_file_path)
@@ -184,6 +207,35 @@ async def predict(files: list[UploadFile] = File(...)):
     return JSONResponse(content=results)
 
 @app.post("/generate-sentences/")
+async def generate_sentences(category: str = Query(..., description="Category for sentence generation")):
+    categories = ["travel", "romance", "exercise", "meetings", "food", "movies", "music"]
+    if category not in categories:
+        raise HTTPException(status_code=400, detail="Invalid category. Choose from travel, romance, exercise, meetings, food, movies, music.")
+
+    user_message = f"Generate 10 different {category}-related English sentences at each level: Bronze, Silver, Gold, Diamond, and Master."
+
+    prompt = f"""
+    user
+    {user_message}
+
+    assistant
+    """
+
+    request = {
+        "prompt": prompt,
+        "max_gen_len": 2048,
+        "temperature": 0.5,
+        "top_p": 0.9,
+    }
+
+    response = bedrock_client.invoke_model(body=json.dumps(request), modelId=model_id)
+    model_response = json.loads(response["body"].read())
+    response_text = model_response["generation"]
+    
+    return {"generated_text": response_text}
+
+
+@app.get("/generate-sentences/")
 async def generate_sentences(category: str = Query(..., description="Category for sentence generation")):
     categories = ["travel", "romance", "exercise", "meetings", "food", "movies", "music"]
     if category not in categories:
