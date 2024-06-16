@@ -17,6 +17,6 @@ fi
 
 # Uvicorn 서버 재시작
 echo "Starting Uvicorn server..."
-nohup uvicorn server.main:app --reload --host=0.0.0.0 --port=10010 > server.log 2>&1 &
+nohup uvicorn server.main:app --reload --host=0.0.0.0 --port=10010 --log-config logging.yaml > server.log 2>&1 &
 
 echo "Uvicorn server started."
