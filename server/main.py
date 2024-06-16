@@ -117,25 +117,20 @@ async def predict(files: list[UploadFile] = File(...)):
             audio_len_max=200000,
             wav=wav_file_path
         )
-        # score_articulation = inference_wav(
-        #     lang="en",
-        #     label_type1="pron",
-        #     label_type2="articulation",
-        #     dir_model='/home/ec2-user/AI_server/server/model_svr_ckpt',
-        #     device="cpu",
-        #     audio_len_max=200000,
-        #     wav=wav_file_path
-        # )
+        # 음성 파일을 텍스트로 변환
+        try:
+            transcription = asr_model.transcribe_file(wav_file_path)
+        except Exception as e:
+            return {"error": str(e)}
+        
         score1 = float(score_prosody)
         score2 = score1
-        #score2 = float(score_articulation)
-        #total_score = score1 + score2
         total_score = score1*2
         # Clean up temporary files
         os.remove(m4a_file_path)
         os.remove(wav_file_path)
 
-        results.append({"filename": file.filename, "score_prosody": score1, "score_articulation": score2, "total_score" : total_score})
+        results.append({"filename": file.filename, "score_prosody": score1, "score_articulation": score2, "total_score" : total_score, "transcription":transcription})
 
     return JSONResponse(content=results)
 
