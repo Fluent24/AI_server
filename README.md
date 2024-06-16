@@ -112,7 +112,7 @@ mple_TTS.wav"
 ## API 엔드포인트
 
 - **TTS(Text-to-Speech)**: 텍스트를 음성 파일로 변환합니다.
-  - **GET `/tts/`**
+  - **GET or POST `/tts/`**
   - 요청 파라미터: `text` (변환할 텍스트)
   - 응답: 생성된 음성 파일
 
@@ -132,7 +132,7 @@ mple_TTS.wav"
   - 응답: 평가 점수  
 
 - **문장 생성**: 특정 카테고리에 맞는 문장을 생성합니다.
-  - **POST `/generate-sentences/`**
+  - **GET or POST `/generate-sentences/`**
   - 요청 파라미터: `category` (문장 생성 카테고리)
   - 응답: 생성된 문장
 
