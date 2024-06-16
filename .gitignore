@@ -7,7 +7,7 @@
 pretrained_models
 .ipynb_checkpoints
 */.ipynb_checkpoints/*
-
+*.wav
 .ipynb_checkpoints/
 pretrained_models/
 tmp*/
