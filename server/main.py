@@ -6,7 +6,8 @@ import subprocess
 import boto3
 import json
 import concurrent.futures
-
+import asyncio
+import aiofiles
 sys.path.append('/usr/bin/ffmpeg')
 
 import torchaudio  # PyTorch audio library
@@ -17,8 +18,8 @@ from speechbrain.inference.ASR import EncoderDecoderASR  # SpeechBrain ASR model
 from speechbrain.inference.TTS import Tacotron2  # SpeechBrain TTS model
 from speechbrain.inference.vocoders import HIFIGAN  # SpeechBrain vocoder model
 
-from .inference_wav_SVR import inference_wav
-
+#from .inference_wav_SVR import inference_wav
+from .inference_wav_optim import inference_wav
 app = FastAPI()
 
 tts_dir = os.path.join(tempfile.gettempdir(), "tmpdir_tts")
@@ -31,11 +32,11 @@ asr_dir = os.path.join(tempfile.gettempdir(), "pretrained_models/asr-crdnn-rnnlm
 # New client for Bedrock Runtime
 bedrock_client = boto3.client("bedrock-runtime", region_name="us-east-1")
 model_id = "meta.llama3-70b-instruct-v1:0"
+
 async def save_temp_file(file: UploadFile, suffix: str):
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix, dir='/tmp') as temp_file:
         temp_file.write(await file.read())
         return temp_file.name
-
 def transcribe_file(asr_model, file_path: str):
     try:
         transcription = asr_model.transcribe_file(file_path)
@@ -159,7 +160,7 @@ async def predict(files: list[UploadFile] = File(...)):
             label_type2="prosody",
             dir_model='/mnt/f/fluent/AI_server/server/model_svr_ckpt',
             device="cpu",
-            audio_len_max=440000,
+            audio_len_max=1000000,
             wav=wav_file_path
         )
         # 음성 파일을 텍스트로 변환
@@ -190,7 +191,7 @@ async def predict(files: list[UploadFile] = File(...)):
         futures = []
         for file in files:
             try:
-                # Save uploaded m4a file to a temporary location
+                # Save uploaded m4a file to a temporary location in /tmp directory
                 m4a_file_path = await save_temp_file(file, suffix=".m4a")
 
                 # Convert m4a to wav
@@ -254,6 +255,112 @@ async def predict(files: list[UploadFile] = File(...)):
 
             finally:
                 os.remove(m4a_file_path)
+                os.remove(wav_file_path)
+
+    return JSONResponse(content=results)
+
+async def convert_m4a_to_wav(m4a_file_path, wav_file_path):
+    process = await asyncio.create_subprocess_exec(
+        "ffmpeg", "-i", m4a_file_path, wav_file_path,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE
+    )
+    stdout, stderr = await process.communicate()
+    if process.returncode != 0:
+        raise Exception(f"FFmpeg error: {stderr.decode()}")
+
+@app.post("/infer3/") #svr model
+async def predict(files: list[UploadFile] = File(...)):
+    results = []
+    asr_model = EncoderDecoderASR.from_hparams(
+        source="speechbrain/asr-crdnn-rnnlm-librispeech", savedir=asr_dir
+    )
+    for file in files:
+        # Save uploaded m4a file to a temporary file
+        try:
+            async with aiofiles.tempfile.NamedTemporaryFile(suffix=".m4a", delete=False) as temp_m4a_file:
+                m4a_file_path = temp_m4a_file.name
+                await temp_m4a_file.write(await file.read())
+
+            # Convert m4a to wav
+            wav_file_path = m4a_file_path.replace(".m4a", ".wav")
+            await convert_m4a_to_wav(m4a_file_path, wav_file_path)
+
+            # Perform inference using the inference_wav function
+            score_prosody = inference_wav(
+                lang="en",
+                label_type1="pron",
+                label_type2="prosody",
+                dir_model='/mnt/f/fluent/AI_server/server/model_svr_ckpt',
+                device="cpu",
+                audio_len_max=400000,
+                wav=wav_file_path
+            )
+            # 음성 파일을 텍스트로 변환
+            try:
+                transcription = asr_model.transcribe_file(wav_file_path)
+            except Exception as e:
+                raise HTTPException(status_code=500, detail="Transcribe failed")
+
+            score1 = float(score_prosody)
+            score2 = score1
+            total_score = score1 * 2
+
+            results.append({"filename": file.filename, "score_prosody": score1, "score_articulation": score2, "total_score": total_score, "transcription": transcription})
+
+        finally:
+            # Clean up temporary files
+            if os.path.exists(m4a_file_path):
+                os.remove(m4a_file_path)
+            if os.path.exists(wav_file_path):
+                os.remove(wav_file_path)
+
+    return JSONResponse(content=results)
+
+@app.post("/infer3/")
+async def predict(files: list[UploadFile] = File(...)):
+    results = []
+    asr_model = EncoderDecoderASR.from_hparams(
+        source="speechbrain/asr-crdnn-rnnlm-librispeech", savedir=asr_dir
+    )
+    for file in files:
+        # Save uploaded m4a file to a temporary file
+        try:
+            async with aiofiles.tempfile.NamedTemporaryFile(suffix=".m4a", delete=False) as temp_m4a_file:
+                m4a_file_path = temp_m4a_file.name
+                await temp_m4a_file.write(await file.read())
+
+            # Convert m4a to wav
+            wav_file_path = m4a_file_path.replace(".m4a", ".wav")
+            await convert_m4a_to_wav(m4a_file_path, wav_file_path)
+
+            # Perform inference using the inference_wav function
+            score_prosody = inference_wav(
+                lang="en",
+                label_type1="pron",
+                label_type2="prosody",
+                dir_model='/mnt/f/fluent/AI_server/server/model_ckpt',
+                device="cpu",
+                audio_len_max=2000000,
+                wav=wav_file_path
+            )
+            # 음성 파일을 텍스트로 변환
+            try:
+                transcription = asr_model.transcribe_file(wav_file_path)
+            except Exception as e:
+                raise HTTPException(status_code=500, detail="Transcribe failed")
+
+            score1 = float(score_prosody)
+            score2 = score1
+            total_score = score1 * 2
+
+            results.append({"filename": file.filename, "score_prosody": score1, "score_articulation": score2, "total_score": total_score, "transcription": transcription})
+
+        finally:
+            # Clean up temporary files
+            if os.path.exists(m4a_file_path):
+                os.remove(m4a_file_path)
+            if os.path.exists(wav_file_path):
                 os.remove(wav_file_path)
 
     return JSONResponse(content=results)
