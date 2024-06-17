@@ -121,8 +121,8 @@ async def predict(files: list[UploadFile] = File(...)):
         try:
             transcription = asr_model.transcribe_file(wav_file_path)
         except Exception as e:
-            return {"error": str(e)}
-        
+            raise HTTPException(status_code=500, detail="Transcribe failed")
+            
         score1 = float(score_prosody)
         score2 = score1
         total_score = score1*2
