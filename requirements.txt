@@ -9,3 +9,4 @@ soundfile
 pydub
 audiofile
 boto3
+aiofiles

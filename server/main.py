@@ -8,10 +8,16 @@ import json
 import concurrent.futures
 import asyncio
 import aiofiles
+import numpy as np
+import joblib
+import torch
+from transformers import Wav2Vec2ForCTC
+import audiofile
 sys.path.append('/usr/bin/ffmpeg')
 
 import torchaudio  # PyTorch audio library
 from fastapi import FastAPI, File, Response, UploadFile, HTTPException, Query, Form
+from contextlib import asynccontextmanager
 from fastapi.responses import FileResponse, JSONResponse  # FastAPI response types
 
 from speechbrain.inference.ASR import EncoderDecoderASR  # SpeechBrain ASR model
@@ -20,6 +26,7 @@ from speechbrain.inference.vocoders import HIFIGAN  # SpeechBrain vocoder model
 
 #from .inference_wav_SVR import inference_wav
 from .inference_wav_optim import inference_wav
+from .inference_wav import inference_wav2
 app = FastAPI()
 
 tts_dir = os.path.join(tempfile.gettempdir(), "tmpdir_tts")
@@ -183,9 +190,6 @@ async def predict(files: list[UploadFile] = File(...)):
 @app.post("/infer2/")
 async def predict(files: list[UploadFile] = File(...)):
     results = []
-    asr_model = EncoderDecoderASR.from_hparams(
-        source="speechbrain/asr-crdnn-rnnlm-librispeech", savedir=asr_dir
-    )
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:  
         futures = []
@@ -200,22 +204,22 @@ async def predict(files: list[UploadFile] = File(...)):
 
                 # Submit parallel inference tasks
                 prosody_future = executor.submit(
-                    inference_wav, 
+                    inference_wav2, 
                     lang="en",
                     label_type1="pron",
                     label_type2="prosody",
-                    dir_model='/mnt/f/fluent/AI_server/server/model_svr_ckpt',
-                    device="cpu",
+                    dir_model='/mnt/f/fluent/AI_server/server/model_ckpt',
+                    device="cuda",
                     audio_len_max=400000,
                     wav=wav_file_path
                 )
                 articulation_future = executor.submit(
-                    inference_wav,
+                    inference_wav2,
                     lang="en",
                     label_type1="pron",
                     label_type2="articulation",
-                    dir_model='/mnt/f/fluent/AI_server/server/model_svr_ckpt',
-                    device="cpu",
+                    dir_model='/mnt/f/fluent/AI_server/server/model_ckpt',
+                    device="cuda",
                     audio_len_max=400000,
                     wav=wav_file_path
                 )
@@ -269,12 +273,12 @@ async def convert_m4a_to_wav(m4a_file_path, wav_file_path):
     if process.returncode != 0:
         raise Exception(f"FFmpeg error: {stderr.decode()}")
 
+asr_model = EncoderDecoderASR.from_hparams(
+    source="speechbrain/asr-crdnn-rnnlm-librispeech", savedir=asr_dir
+)
 @app.post("/infer3/") #svr model
 async def predict(files: list[UploadFile] = File(...)):
     results = []
-    asr_model = EncoderDecoderASR.from_hparams(
-        source="speechbrain/asr-crdnn-rnnlm-librispeech", savedir=asr_dir
-    )
     for file in files:
         # Save uploaded m4a file to a temporary file
         try:
@@ -292,7 +296,7 @@ async def predict(files: list[UploadFile] = File(...)):
                 label_type1="pron",
                 label_type2="prosody",
                 dir_model='/mnt/f/fluent/AI_server/server/model_svr_ckpt',
-                device="cpu",
+                device="cuda",
                 audio_len_max=400000,
                 wav=wav_file_path
             )
@@ -316,16 +320,86 @@ async def predict(files: list[UploadFile] = File(...)):
                 os.remove(wav_file_path)
 
     return JSONResponse(content=results)
+global_svr_models = {}
+global_scalers = {}
+global_base_model = None
+asr_model = None
+def load_models_and_scalers():
+    languages = ['en']
+    label_types = [('pron', 'prosody'), ('pron', 'articulation')]
+    dir_model = '/mnt/f/fluent/AI_server/server/model_svr_ckpt'
 
-@app.post("/infer3/")
-async def predict(files: list[UploadFile] = File(...)):
-    results = []
+    for lang in languages:
+        for label_type1, label_type2 in label_types:
+            model_path = os.path.join(dir_model, f'lang_{lang}/svr_model_{label_type1}+{label_type2}.joblib')
+            scaler_path = os.path.join(dir_model, f'lang_{lang}/scaler_{label_type1}+{label_type2}.joblib')
+
+            if not os.path.exists(model_path):
+                raise FileNotFoundError(f"Model checkpoint not found at {model_path}")
+
+            svr_model = joblib.load(model_path)
+            scaler = joblib.load(scaler_path)
+
+            global_svr_models[(label_type1, label_type2)] = svr_model
+            global_scalers[(label_type1, label_type2)] = scaler
+
+    global global_base_model
+    base_model_name = 'facebook/wav2vec2-large-robust-ft-libri-960h'
+    global_base_model = Wav2Vec2ForCTC.from_pretrained(base_model_name).to('cuda')
+    # ASR 모델 초기화
+    global asr_model
     asr_model = EncoderDecoderASR.from_hparams(
         source="speechbrain/asr-crdnn-rnnlm-librispeech", savedir=asr_dir
     )
+
+    print(f"Models and scalers loaded successfully.")
+
+load_models_and_scalers()
+
+def inference_wav(label_type1: str, label_type2: str, device: str, audio_len_max: int, wav: str):
+    svr_model = global_svr_models[(label_type1, label_type2)]
+    scaler = global_scalers[(label_type1, label_type2)]
+    base_model = global_base_model
+
+    x, sr = audiofile.read(wav)
+    x = torch.tensor(x[:min(x.shape[-1], audio_len_max)], device=device).reshape(1, -1)
+    
+    with torch.no_grad():
+        feat_x = base_model(x, output_attentions=False, output_hidden_states=True, return_dict=True).hidden_states[-1]
+        feat_x = torch.mean(feat_x, axis=1).cpu().numpy()
+    
+    # Clear intermediate variables to free memory
+    del x
+    torch.cuda.empty_cache() if torch.cuda.is_available() else None
+
+    # Scale features
+    feat_x = scaler.transform(feat_x)
+
+    # Predict pronunciation score using SVR
+    pred_score = svr_model.predict(feat_x)
+    pred_score = np.clip(pred_score, 0, 5)
+
+    print(f'score: {pred_score[0]}')
+
+    # Clear feature variable to free memory
+    del feat_x
+    torch.cuda.empty_cache() if torch.cuda.is_available() else None
+    
+    return pred_score[0]
+
+#@asynccontextmanager
+async def lifespan(app: FastAPI):
+    load_models_and_scalers()
+    yield
+
+@app.post("/infer4/")
+async def predict(files: list[UploadFile] = File(...)):
+    results = []
     for file in files:
-        # Save uploaded m4a file to a temporary file
+        m4a_file_path = None
+        wav_file_path = None
         try:
+            # Save uploaded m4a file to a temporary file
             async with aiofiles.tempfile.NamedTemporaryFile(suffix=".m4a", delete=False) as temp_m4a_file:
                 m4a_file_path = temp_m4a_file.name
                 await temp_m4a_file.write(await file.read())
@@ -336,17 +410,16 @@ async def predict(files: list[UploadFile] = File(...)):
 
             # Perform inference using the inference_wav function
             score_prosody = inference_wav(
-                lang="en",
                 label_type1="pron",
                 label_type2="prosody",
-                dir_model='/mnt/f/fluent/AI_server/server/model_ckpt',
-                device="cpu",
-                audio_len_max=2000000,
+                device="cuda",
+                audio_len_max=400000,
                 wav=wav_file_path
             )
-            # 음성 파일을 텍스트로 변환
+            # 음성 파일
             try:
-                transcription = asr_model.transcribe_file(wav_file_path)
+                transcription = transcribe_file(asr_model,wav_file_path)
+                print(transcription)
             except Exception as e:
                 raise HTTPException(status_code=500, detail="Transcribe failed")
 
@@ -358,12 +431,18 @@ async def predict(files: list[UploadFile] = File(...)):
 
         finally:
             # Clean up temporary files
-            if os.path.exists(m4a_file_path):
+            if m4a_file_path and os.path.exists(m4a_file_path):
                 os.remove(m4a_file_path)
-            if os.path.exists(wav_file_path):
+            if wav_file_path and os.path.exists(wav_file_path):
                 os.remove(wav_file_path)
 
     return JSONResponse(content=results)
+
+# Utility function to convert m4a to wav
+async def convert_m4a_to_wav(input_file, output_file):
+    command = ["ffmpeg", "-i", input_file, output_file]
+    process = await asyncio.create_subprocess_exec(*command)
+    await process.communicate()
 
 @app.post("/generate-sentences/")
 async def generate_sentences(category: str = Query(..., description="Category for sentence generation")):
