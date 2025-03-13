@@ -1,7 +1,8 @@
 # Fluent AI 서버
+<img src="fluent%20Architecture.png" width="600" alt="Architecture">  
+<img src="poster.png" width="600"  alt="poster">
 
 이 저장소는 오디오 파일을 처리하고 텍스트로 변환(STT), 텍스트를 음성으로 변환(TTS), 그리고 발음 평가를 수행하는 다양한 스크립트를 포함하고 있습니다. 주요 기능은 FastAPI를 사용하여 RESTful API를 제공하는 것입니다.
-
 ## 목차
 
 - [Fluent AI 서버](#fluent-ai-서버)
